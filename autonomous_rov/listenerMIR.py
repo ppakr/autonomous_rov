@@ -68,9 +68,9 @@ class MyPythonNode(Node):
         # self.set_mode[1] = False  # Mode automatic without correction
         # self.set_mode[2] = False  # Mode with correction
         
-        self.set_mode[0] = False
+        self.set_mode[0] = True
         self.set_mode[1] = False
-        self.set_mode[2] = True
+        self.set_mode[2] = False
 
         # Conditions
         self.init_a0 = True
@@ -534,12 +534,20 @@ class MyPythonNode(Node):
         else:
             self.get_logger().info("Sending...")
 
+        # # creat cmd vel vector with 6 values
+        # cmd_vel.linear.x = 0.1
+        # cmd_vel.linear.y = 0
+        # cmd_vel.linear.z = 0
+        # cmd_vel.angular.x = 0
+        # cmd_vel.angular.y = 0
+        # cmd_vel.angular.z = 0
+        
         # Extract cmd_vel message
         roll_left_right = self.mapValueScalSat(cmd_vel.angular.x)
-        yaw_left_right = self.mapValueScalSat(-cmd_vel.angular.z)
+        yaw_left_right = self.mapValueScalSat(cmd_vel.angular.z)
         ascend_descend = self.mapValueScalSat(cmd_vel.linear.z)
         forward_reverse = self.mapValueScalSat(cmd_vel.linear.x)
-        lateral_left_right = self.mapValueScalSat(-cmd_vel.linear.y)
+        lateral_left_right = self.mapValueScalSat(cmd_vel.linear.y)
         pitch_left_right = self.mapValueScalSat(cmd_vel.angular.y)
 
         self.setOverrideRCIN(pitch_left_right, roll_left_right, ascend_descend, yaw_left_right, forward_reverse,
