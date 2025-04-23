@@ -371,8 +371,9 @@ class MyPythonNode(Node):
             return
         elif self.set_mode[2]: # dis mode
             # send commands in correction mode
-            self.setOverrideRCIN(1500, 1500, self.Correction_depth, self.Correction_yaw, 1500, 1500)
+            # self.setOverrideRCIN(1500, 1500, self.Correction_depth, self.Correction_yaw, 1500, 1500)
             # self.get_logger().info("Setmode[2]")
+            pass
 
         else:  # normally, never reached
             pass
@@ -552,6 +553,20 @@ class MyPythonNode(Node):
 
         self.setOverrideRCIN(pitch_left_right, roll_left_right, ascend_descend, yaw_left_right, forward_reverse,
                              lateral_left_right)
+    
+    def visual_tracker_callback(self, data):
+        if self.set_mode[2]:
+
+            roll_left_right = self.mapValueScalSat(data.angular.x)
+            yaw_left_right = self.mapValueScalSat(data.angular.z)
+            ascend_descend = self.mapValueScalSat(data.linear.z)
+            forward_reverse = self.mapValueScalSat(data.linear.x)
+            lateral_left_right = self.mapValueScalSat(data.linear.y)
+            pitch_left_right = self.mapValueScalSat(data.angular.y)
+            self.setOverrideRCIN(pitch_left_right, roll_left_right, ascend_descend, yaw_left_right, forward_reverse,
+                                 lateral_left_right)
+        else:
+            self.get_logger().info("Not in corrected mode, ignoring visual tracker data.")
 
     def setOverrideRCIN(self, channel_pitch, channel_roll, channel_throttle, channel_yaw, channel_forward,
                         channel_lateral):
@@ -598,6 +613,11 @@ class MyPythonNode(Node):
         self.subcmdvel  # prevent unused variable warning
         self.subimu = self.create_subscription(Imu, "imu/data", self.OdoCallback, qos_profile=qos_profile)
         self.subimu  # prevent unused variable warning
+
+        # visual tracker callback
+        self.subvisual_tracker = self.create_subscription(Twist, "visual_tracker", self.visual_tracker_callback,
+                                                           qos_profile=qos_profile)
+        self.subvisual_tracker  # prevent unused variable warning
 
         self.subrel_alt = self.create_subscription(Float64, "global_position/rel_alt", self.RelAltCallback,
                                                    qos_profile=qos_profile)
