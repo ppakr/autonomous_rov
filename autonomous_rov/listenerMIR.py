@@ -7,7 +7,7 @@ import math
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from struct import pack, unpack
-from std_msgs.msg import Int16, Float64, Empty, Float64MultiArray, String
+from std_msgs.msg import Int16, Float64, Empty, Float64MultiArray, String, Bool
 from sensor_msgs.msg import Joy, Imu, FluidPressure, LaserScan
 from mavros_msgs.srv import CommandLong, SetMode, StreamRate
 from mavros_msgs.msg import OverrideRCIn, Mavlink
@@ -17,9 +17,10 @@ from nav_msgs.msg import Odometry
 from std_srvs.srv import SetBool
 
 from autonomous_rov.PIDController import PIDController
-from autonomous_rov.CubicTrajectory import CubicTrajectory
+# from autonomous_rov.CubicTrajectory import CubicTrajectory
 from autonomous_rov.AlphaBetaFilter import AlphaBetaFilter
 from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
+from rclpy.parameter import ParameterType
 
 class MyPythonNode(Node):
     def __init__(self):
@@ -29,13 +30,13 @@ class MyPythonNode(Node):
         self.ns = self.get_namespace()
         self.get_logger().info("namespace =" + self.ns)
         self.pub_msg_override = self.create_publisher(OverrideRCIn, "rc/override", 10)
-        self.pub_angle_degre = self.create_publisher(Twist, 'angle_degree', 10)
-        self.pub_depth = self.create_publisher(Float64, 'depth', 10)
+        self.pub_angle_degree = self.create_publisher(Twist, 'angle_degree', 10)
+        self.pub_depth_error = self.create_publisher(Float64, '/depth_error_val', 10)
         self.pub_angular_velocity = self.create_publisher(Twist, 'angular_velocity', 10)
-        self.pub_linear_velocity = self.create_publisher(Twist, 'linear_velocity', 10)
-        self.thrusters_val = self.create_publisher(Float64, 'thrusters_val', 10)
-        self.yaw_val = self.create_publisher(Float64, 'yaw_val', 10)
-        self.filtered_state = self.create_publisher(Odometry, 'filtered_state', 10)
+        # self.pub_linear_velocity = self.create_publisher(Twist, 'linear_velocity', 10)
+        self.pub_depth_pwm = self.create_publisher(Float64, '/depth_pwm', 10)
+        self.yaw_error_pwm = self.create_publisher(Float64, '/yaw_error_pwm', 10)
+        # self.filtered_state = self.create_publisher(Odometry, 'filtered_state', 10)
         self.pub_generated_traj = self.create_publisher(Pose, 'generated_traj', 10)
         self.pub_generated_traj_dot = self.create_publisher(Twist, 'generated_traj_dot', 10)
 
@@ -64,18 +65,15 @@ class MyPythonNode(Node):
         # variables
         # mode -> array
         self.set_mode = [0] * 3
-        # self.set_mode[0] = True  # Mode manual
-        # self.set_mode[1] = False  # Mode automatic without correction
-        # self.set_mode[2] = False  # Mode with correction
-        
-        self.set_mode[0] = True
-        self.set_mode[1] = False
-        self.set_mode[2] = False
+        self.set_mode[0] = True  # Mode manual
+        self.set_mode[1] = False  # Mode automatic without correction
+        self.set_mode[2] = False  # Mode with correction
+        self.set_mode[3] = False  # Mode with pinger
 
         # Conditions
         self.init_a0 = True
         self.init_p0 = True
-        self.arming = True
+        self.arming = False
 
         self.angle_roll_ajoyCallback0 = 0.0
         self.angle_pitch_a0 = 0.0
@@ -85,6 +83,15 @@ class MyPythonNode(Node):
 
         self.pinger_confidence = 0
         self.pinger_distance = 0
+        self.pinger_prev_error = 0.0
+        self.pinger_error_change = 0.0
+        self.pinger_error = 0.0
+        self.pinger_threshold = 0.75
+
+        self.free_path = False
+        self.search_path = True
+        self.crab_walk = False
+
 
         self.Vmax_mot = 1900
         self.Vmin_mot = 1100
@@ -93,13 +100,17 @@ class MyPythonNode(Node):
         # assume neutral buoyancy + water bottle
         # ~ 1.5 kgf -> 15 N
         
-        self.Correction_yaw = 1500
+        self.Correction_yaw_pwm = 1500
         self.Correction_depth = 1500 # need to calculate using water bottle + flotability
+        self.surge_pwm = 1500
+        self.sway_pwm = 1500
 
         # controller parameters
         self.config = {}
         self.pid_depth = PIDController(type='linear')
         self.pid_yaw = PIDController(type='angular')
+        self.pid_surge = PIDController(type='linear')
+        self.pid_sway = PIDController(type='linear')
 
         self.declare_and_set_params()
 
@@ -110,11 +121,11 @@ class MyPythonNode(Node):
         self.desired_yaw = 0.0
 
         # alpha-beta filter
-        self.depth_filter = AlphaBetaFilter(alpha=0.85, beta=0.005)
+        # self.depth_filter = AlphaBetaFilter(alpha=0.85, beta=0.005)
         self.yaw_filter = AlphaBetaFilter(alpha=0.85, beta=0.005)
 
         # Initialize trajectory but do not start
-        self.trajectory = CubicTrajectory(z_init=self.depth_p0, z_final=-0.2)
+        # self.trajectory = CubicTrajectory(z_init=self.depth_p0, z_final=-0.2)
         self.traj_active = False  # Trajectory state
         self.time_init = None
         self.time_final = None
@@ -210,13 +221,13 @@ class MyPythonNode(Node):
         depth_control = self.pid_depth.calculate_pid(self.desired_depth, current_depth, current_time) - floatability
         pub_error_depth = Float64()
         pub_error_depth.data = depth_control
-        self.pub_depth.publish(pub_error_depth)
+        self.pub_depth_error.publish(pub_error_depth)
 
         depth_control = self.pid_to_pwm(-depth_control)
 
         pub_depth = Float64()
         pub_depth.data = depth_control
-        self.thrusters_val.publish(pub_depth)
+        self.pub_depth_pwm.publish(pub_depth)
 
         # calculate alpha-beta filter for task 9
         # filtered_depth, filtered_depth_dot = self.depth_filter.filter(current_depth, current_time)
@@ -232,11 +243,11 @@ class MyPythonNode(Node):
         # depth_control = self.pid_depth.calculate_pid(self.desired_depth, current_depth, current_time, z_dot) - floatability
         # pub_error_depth = Float64()
         # pub_error_depth.data = depth_control
-        # self.pub_depth.publish(pub_error_depth)
+        # self.pub_depth_error.publish(pub_error_depth)
         # depth_control = self.pid_to_pwm(-depth_control)
         # pub_depth = Float64()
         # pub_depth.data = depth_control
-        # self.thrusters_val.publish(pub_depth)
+        # self.pub_depth_pwm.publish(pub_depth)
         ##############################################
 
         # update Correction_depth
@@ -289,7 +300,7 @@ class MyPythonNode(Node):
         angle.angular.y = angle_wrt_startup[1]
         angle.angular.z = angle_wrt_startup[2]
 
-        self.pub_angle_degre.publish(angle)
+        self.pub_angle_degree.publish(angle)
 
         # Extraction of angular velocity
         p = angular_velocity.x
@@ -344,16 +355,87 @@ class MyPythonNode(Node):
 
         # Send PWM commands to motors
         # yaw command to be adapted using sensor feedback
-        # self.Correction_yaw = 1500
+        # self.Correction_yaw_pwm = 1500
 
-        correction_yaw = self.pid_to_pwm(yaw_control)
+        correction_yaw_pwm = self.pid_to_pwm(yaw_control)
 
         pub_error_yaw = Float64()
-        pub_error_yaw.data = correction_yaw
-        self.yaw_val.publish(pub_error_yaw)
+        pub_error_yaw.data = correction_yaw_pwm
+        self.yaw_error_pwm.publish(pub_error_yaw)
 
 
-        self.Correction_yaw = int(correction_yaw)
+        self.Correction_yaw_pwm = int(correction_yaw_pwm)
+
+    def crab_walk_callback(self, data):
+        self.crab_walk = data.data
+
+    def pinger_callback(self, data):
+        if (self.set_mode[0] or self.set_mode[1] or self.set_mode[2]):
+            return
+        else:
+            """
+            Get pinger data from this function
+            """
+            # get time now
+            time_tupple = self.get_clock().now().seconds_nanoseconds()
+            current_time = time_tupple[0] + (time_tupple[1] * 10**-9)
+
+            # extract pinger data
+            self.pinger_distance = data.data[0]
+            self.pinger_confidence = data.data[1]
+
+            self.pinger_threshold = 0.75  # threshold for pinger confidence
+
+            # Obstacle detected: closer than safe threshold
+            if self.pinger_distance < self.pinger_threshold:
+                self.free_path = False
+                self.get_logger().info("Obstacle detected by pinger")
+
+                # Compute control signal to stop or slow down
+                surge_control = self.pid_surge.calculate_pid(
+                    self.pinger_distance, self.pinger_threshold, current_time
+                )
+                self.surge_pwm = self.pid_to_pwm(surge_control)
+
+                # Compute error derivative
+                self.pinger_error = self.pinger_distance - self.pinger_threshold
+                self.pinger_error_change = self.pinger_error - self.pinger_prev_error
+                self.pinger_prev_error = self.pinger_error
+
+                if np.abs(self.pinger_error_change) > 0.05 and self.crab_walk:
+                    self.surge_control = self.pid_surge.calculate_pid(
+                        self.pinger_distance, self.pinger_threshold, current_time
+                    )
+                    self.surge_pwm = self.pid_to_pwm(surge_control)
+                    self.sway_pwm = 1600  # Crab walk
+
+                # If the distance isn't changing much, assume stuck and start search
+                if abs(self.pinger_error_change) < 0.05:
+                    self.surge_pwm = 1500
+                    self.sway_pwm = 1500
+                    self.search_path = True
+
+            # If currently searching for a path
+            if self.search_path:
+                self.get_logger().info("Searching for path")
+                self.surge_pwm = 1500
+                self.sway_pwm = 1500
+                self.desired_yaw += 5  # Slowly rotate to look around
+
+                # If obstacle is now far enough, resume movement
+                if self.pinger_distance > 2 * self.pinger_threshold:
+                    self.free_path = True
+                    self.search_path = False
+                    self.get_logger().info("Free path detected by pinger")
+
+            # If the path is clear, move forward
+            if self.free_path:
+                self.get_logger().info("Free path detected by pinger")
+                self.surge_pwm = 1600  # Move forward
+                self.sway_pwm = 1500   # Keep lateral movement neutral
+                
+
+
 
     def timer_callback(self):
         # msg = String()
@@ -364,17 +446,19 @@ class MyPythonNode(Node):
 
         if self.set_mode[0]:  # commands sent inside joyCallback()
             return
-        elif self.set_mode[
-            1]:  # Arbitrary velocity command can be defined here to observe robot's velocity, zero by default
-            self.setOverrideRCIN(1500, 1500, 1500, 1500, 1500, 1500)
+        elif self.set_mode[1]:  # Arbitrary velocity command can be defined here to observe robot's velocity, zero by default
+            # self.setOverrideRCIN(1500, 1500, 1500, 1500, 1500, 1500)
             # self.get_logger().info("Setmode[1]")
             return
         elif self.set_mode[2]: # dis mode
             # send commands in correction mode
-            # self.setOverrideRCIN(1500, 1500, self.Correction_depth, self.Correction_yaw, 1500, 1500)
-            # self.get_logger().info("Setmode[2]")
+            self.setOverrideRCIN(1500, 1500, self.Correction_depth, self.Correction_yaw_pwm, 1500, 1500)
+            self.get_logger().info("Setmode[2]")
             pass
-
+        elif self.set_mode[3]:  # pinger mode
+            self.setOverrideRCIN(1500, 1500, self.Correction_depth, self.Correction_yaw_pwm, self.surge_pwm, self.sway_pwm)
+            self.get_logger().info("Setmode[3]")
+            pass
         else:  # normally, never reached
             pass
 
@@ -497,6 +581,7 @@ class MyPythonNode(Node):
         btn_manual_mode = data.buttons[3]  # Y button
         btn_automatic_mode = data.buttons[2]  # X button
         btn_corrected_mode = data.buttons[0]  # A button
+        btn_collision_mode = data.buttons[1]  # B button
 
         # Disarming when Back button is pressed
         if (btn_disarm == 1 and self.arming == True):
@@ -513,11 +598,13 @@ class MyPythonNode(Node):
             self.set_mode[0] = True
             self.set_mode[1] = False
             self.set_mode[2] = False
+            self.set_mode[3] = False
             self.get_logger().info("Mode manual")
         if (btn_automatic_mode and not self.set_mode[1]):
             self.set_mode[0] = False
             self.set_mode[1] = True
             self.set_mode[2] = False
+            self.set_mode[3] = False
             self.get_logger().info("Mode automatic")
         if (btn_corrected_mode and not self.set_mode[2]):
             self.init_a0 = True
@@ -526,7 +613,15 @@ class MyPythonNode(Node):
             self.set_mode[0] = False
             self.set_mode[1] = False
             self.set_mode[2] = True
+            self.set_mode[3] = False
             self.get_logger().info("Mode correction")
+        if (btn_collision_mode and not self.set_mode[3]):
+            self.set_mode[0] = False
+            self.set_mode[1] = False
+            self.set_mode[2] = False
+            self.set_mode[3] = True
+            self.get_logger().info("Mode collision avoidance")
+        
 
     def velCallback(self, cmd_vel):
         # Only continue if manual_mode is enabled
@@ -545,18 +640,19 @@ class MyPythonNode(Node):
         
         # Extract cmd_vel message
         roll_left_right = self.mapValueScalSat(cmd_vel.angular.x)
-        yaw_left_right = self.mapValueScalSat(cmd_vel.angular.z)
+        yaw_left_right = self.mapValueScalSat(-cmd_vel.angular.z)
         ascend_descend = self.mapValueScalSat(cmd_vel.linear.z)
         forward_reverse = self.mapValueScalSat(cmd_vel.linear.x)
-        lateral_left_right = self.mapValueScalSat(cmd_vel.linear.y)
+        lateral_left_right = self.mapValueScalSat(-cmd_vel.linear.y)
         pitch_left_right = self.mapValueScalSat(cmd_vel.angular.y)
 
         self.setOverrideRCIN(pitch_left_right, roll_left_right, ascend_descend, yaw_left_right, forward_reverse,
                              lateral_left_right)
     
     def visual_tracker_callback(self, data):
-        if self.set_mode[2]:
-
+        if (self.set_mode[2] or self.set_mode[0]):
+            return
+        else:
             self.get_logger().info("Visual tracker data rece ived.")
             # roll_left_right = self.mapValueScalSat(data.angular.x)
             yaw_left_right = self.mapValueScalSat(data.angular.z)
@@ -574,8 +670,8 @@ class MyPythonNode(Node):
             lateral_left_right = min(1600, max(1400, lateral_left_right))  # Saturate lateral command
             self.setOverrideRCIN(pitch_left_right, roll_left_right, ascend_descend, yaw_left_right, forward_reverse,
                                  lateral_left_right)
-        else:
-            self.get_logger().info("Not in corrected mode, ignoring visual tracker data.")
+        # else:
+        #     self.get_logger().info("Not in corrected mode, ignoring visual tracker data.")
 
     def setOverrideRCIN(self, channel_pitch, channel_roll, channel_throttle, channel_yaw, channel_forward,
                         channel_lateral):
@@ -632,6 +728,16 @@ class MyPythonNode(Node):
                                                    qos_profile=qos_profile)
         self.subrel_alt  # prevent unused variable warning
 
+        self.sublaser = self.create_subscription(Float64MultiArray, '/ping/data', self.pinger_callback,
+                                                 qos_profile=qos_profile)
+        self.sublaser
+
+        #crab walk 
+        self.subcrab_walk = self.create_subscription(Bool, '/crab_walk', self.crab_walk_callback,
+                                                     qos_profile=qos_profile)
+        self.subcrab_walk
+
+
         self.get_logger().info("Subscriptions done.")
 
 
@@ -640,6 +746,8 @@ class MyPythonNode(Node):
     def update_control_param(self):
         self.pid_depth.reconfig_param(self.config['k_p_depth'], self.config['k_i_depth'], self.config['k_d_depth'])
         self.pid_yaw.reconfig_param(self.config['k_p_yaw'], self.config['k_i_yaw'], self.config['k_d_yaw'])
+        self.pid_surge.reconfig_param(self.config['k_p_surge'], self.config['k_i_surge'], self.config['k_d_surge'])
+        self.pid_sway.reconfig_param(self.config['k_p_sway'], self.config['k_i_sway'], self.config['k_d_sway'])
 
     def callback_params(self, params):
         for param in params:
@@ -647,21 +755,37 @@ class MyPythonNode(Node):
         self.update_control_param()
         return SetParametersResult(successful=True)
 
-    def _declare_and_fill_map(self, key, default_value, description, map):
+    def _declare_and_fill_slider(self, key, default_value, description, min_value, max_value, map):
         param = self.declare_parameter(
-            key, default_value, ParameterDescriptor(description=description))
+            key, default_value, ParameterDescriptor(
+                description=description,
+                type=ParameterType.PARAMETER_DOUBLE,
+                floating_point_range=[
+                    {"from_value": min_value, "to_value": max_value}
+                ]
+            )
+        )
         map[key] = param.value
 
     def declare_and_set_params(self):
         # self.config = {}
-        self._declare_and_fill_map('k_p_depth', 4.0, "K P of depth", self.config)
-        self._declare_and_fill_map('k_i_depth', 0.0, "K I of depth", self.config)
-        self._declare_and_fill_map('k_d_depth', 0.0, "K D of depth", self.config)
+        self._declare_and_fill_slider('k_p_depth', 2.0, "K P of depth", 0.0, 10.0, self.config) # last kp val 4
+        self._declare_and_fill_slider('k_i_depth', 0.0, "K I of depth", 0.0, 5.0, self.config)
+        self._declare_and_fill_slider('k_d_depth', 0.0, "K D of depth", 0.0, 5.0, self.config)
 
-        self._declare_and_fill_map('k_p_yaw', 1.0, "K P of yaw", self.config)
-        self._declare_and_fill_map('k_i_yaw', 0.0, "K I of yaw", self.config)
-        self._declare_and_fill_map('k_d_yaw', 0.0, "K D of yaw", self.config)
+        self._declare_and_fill_slider('k_p_yaw', 1.0, "K P of yaw", 0.0, 10.0, self.config)
+        self._declare_and_fill_slider('k_i_yaw', 0.0, "K I of yaw", 0.0, 5.0, self.config)
+        self._declare_and_fill_slider('k_d_yaw', 0.0, "K D of yaw", 0.0, 5.0, self.config)
 
+        self._declare_and_fill_slider('k_p_surge', 1.0, "K P of surge", 0.0, 10.0, self.config)
+        self._declare_and_fill_slider('k_i_surge', 0.0, "K I of surge", 0.0, 5.0, self.config)
+        self._declare_and_fill_slider('k_d_surge', 0.0, "K D of surge", 0.0, 5.0, self.config)
+
+        self._declare_and_fill_slider('k_p_sway', 1.0, "K P of sway", 0.0, 10.0, self.config)
+        self._declare_and_fill_slider('k_i_sway', 0.0, "K I of sway", 0.0, 5.0, self.config)
+        self._declare_and_fill_slider('k_d_sway', 0.0, "K D of sway", 0.0, 5.0, self.config)
+
+ 
         self.update_control_param()
 
 
