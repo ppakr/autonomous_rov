@@ -117,7 +117,7 @@ class MyPythonNode(Node):
         # create parameter callback
         self.add_on_set_parameters_callback(self.callback_params)
 
-        self.desired_depth = -0.2
+        self.desired_depth = 0.0
         self.desired_yaw = 0.0
 
         # alpha-beta filter
@@ -159,9 +159,9 @@ class MyPythonNode(Node):
         Convert pid output to pwm signal
         """
         if pid > 0:
-            pwm = 1468 - 110 * pid
+            pwm = 1500 - 110 * pid
         else:
-            pwm = 1528 - 90 * pid
+            pwm = 1500 - 90 * pid
         if pwm > 1900:
             pwm = 1900
         elif pwm < 1100:
@@ -318,12 +318,13 @@ class MyPythonNode(Node):
         # Only continue if manual_mode is disabled
         if (self.set_mode[0]):
             return
-
+        
+        # self.desired_yaw = angle.angular.z
         # alpha-beta filter
-        filtered_angle, filtered_angle_dot = self.yaw_filter.filter(angle.angular.z, current_time)
+        # filtered_angle, filtered_angle_dot = self.yaw_filter.filter(angle.angular.z, current_time)
 
         # Compute yaw error
-        yaw_error = self.desired_yaw - filtered_angle
+        yaw_error = self.desired_yaw - angle.angular.z
         if yaw_error > np.pi:
             yaw_error -= 2.0 * np.pi
         elif yaw_error < -np.pi:
@@ -351,7 +352,7 @@ class MyPythonNode(Node):
                 self.get_logger().info("Trajectory complete.")
 
         # yaw control
-        yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, filtered_angle, current_time)
+        yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, angle.angular.z, current_time)
 
         # Send PWM commands to motors
         # yaw command to be adapted using sensor feedback
@@ -376,6 +377,7 @@ class MyPythonNode(Node):
             """
             Get pinger data from this function
             """
+            # self.get_logger().info("Pinger data received.")
             # get time now
             time_tupple = self.get_clock().now().seconds_nanoseconds()
             current_time = time_tupple[0] + (time_tupple[1] * 10**-9)
@@ -384,56 +386,67 @@ class MyPythonNode(Node):
             self.pinger_distance = data.data[0]
             self.pinger_confidence = data.data[1]
 
-            self.pinger_threshold = 0.75  # threshold for pinger confidence
+            # self.get_logger().info(f"Distance: {self.pinger_distance:.3f}")
+
+            self.pinger_threshold = 1.0  # threshold for pinger confidence
 
             # Obstacle detected: closer than safe threshold
-            if self.pinger_distance < self.pinger_threshold:
-                self.free_path = False
+            if self.pinger_confidence < 70:
                 self.get_logger().info("Obstacle detected by pinger")
+                self.surge_pwm = 1500
+                self.sway_pwm = 1500
+                # self.Correction_yaw_pwm = 1500
+            
+            else:
+                
+                if self.pinger_distance < self.pinger_threshold:
+                    self.free_path = False
+                    self.get_logger().info("Obstacle detected by pinger")
 
-                # Compute control signal to stop or slow down
-                surge_control = self.pid_surge.calculate_pid(
-                    self.pinger_distance, self.pinger_threshold, current_time
-                )
-                self.surge_pwm = self.pid_to_pwm(surge_control)
-
-                # Compute error derivative
-                self.pinger_error = self.pinger_distance - self.pinger_threshold
-                self.pinger_error_change = self.pinger_error - self.pinger_prev_error
-                self.pinger_prev_error = self.pinger_error
-
-                if np.abs(self.pinger_error_change) > 0.05 and self.crab_walk:
-                    self.surge_control = self.pid_surge.calculate_pid(
+                    # Compute control signal to stop or slow down
+                    surge_control = self.pid_surge.calculate_pid(
                         self.pinger_distance, self.pinger_threshold, current_time
                     )
                     self.surge_pwm = self.pid_to_pwm(surge_control)
-                    self.sway_pwm = 1600  # Crab walk
 
-                # If the distance isn't changing much, assume stuck and start search
-                if abs(self.pinger_error_change) < 0.05:
+                    # Compute error derivative
+                    self.pinger_error = self.pinger_distance - self.pinger_threshold
+                    self.pinger_error_change = self.pinger_error - self.pinger_prev_error
+                    self.pinger_prev_error = self.pinger_error
+
+                    if np.abs(self.pinger_error_change) > 0.05 and self.crab_walk:
+                        self.surge_control = self.pid_surge.calculate_pid(
+                            self.pinger_distance, self.pinger_threshold, current_time
+                        )
+                        self.surge_pwm = self.pid_to_pwm(surge_control)
+                        self.sway_pwm = 1600  # Crab walk
+
+                    # If the distance isn't changing much, assume stuck and start search
+                    if abs(self.pinger_error_change) < 0.05:
+                        self.surge_pwm = 1500
+                        self.sway_pwm = 1500
+                        self.search_path = True
+
+                # If currently searching for a path
+                if self.search_path:
+                    self.get_logger().info("Searching for path")
                     self.surge_pwm = 1500
                     self.sway_pwm = 1500
-                    self.search_path = True
+                    self.desired_yaw += -1  # Slowly rotate to look around
 
-            # If currently searching for a path
-            if self.search_path:
-                self.get_logger().info("Searching for path")
-                self.surge_pwm = 1500
-                self.sway_pwm = 1500
-                self.desired_yaw += 5  # Slowly rotate to look around
+                    # If obstacle is now far enough, resume movement
+                    if self.pinger_distance > 2 * self.pinger_threshold:
+                        self.free_path = True
+                        self.search_path = False
+                        self.get_logger().info("Free path detected by pinger")
 
-                # If obstacle is now far enough, resume movement
-                if self.pinger_distance > 2 * self.pinger_threshold:
-                    self.free_path = True
-                    self.search_path = False
-                    self.get_logger().info("Free path detected by pinger")
-
-            # If the path is clear, move forward
-            if self.free_path:
-                self.get_logger().info("Free path detected by pinger")
-                self.surge_pwm = 1600  # Move forward
-                self.sway_pwm = 1500   # Keep lateral movement neutral
-                
+                # If the path is clear, move forward
+                if self.free_path:
+                    self.get_logger().info("Free path detected by pinger >>> surging")
+                    self.surge_pwm = 1535 # * self.pid_sway.k_p  # Move forward
+                    # self.Correction_yaw_pwm = 1500
+                    self.sway_pwm = 1500   # Keep lateral movement neutral
+                    
 
 
 
@@ -456,8 +469,10 @@ class MyPythonNode(Node):
             self.get_logger().info("Setmode[2]")
             pass
         elif self.set_mode[3]:  # pinger mode
-            self.setOverrideRCIN(1500, 1500, self.Correction_depth, self.Correction_yaw_pwm, self.surge_pwm, self.sway_pwm)
-            self.get_logger().info("Setmode[3]")
+            self.setOverrideRCIN(1500, 1500, 1500, self.Correction_yaw_pwm, self.surge_pwm, self.sway_pwm)
+            # self.get_logger().info("Setmode[3]")
+            self.get_logger().info(f"yaw_pwm: {self.Correction_yaw_pwm}, surge_pwm: {self.surge_pwm}, sway_pwm: {self.sway_pwm}")
+
             pass
         else:  # normally, never reached
             pass
@@ -728,7 +743,7 @@ class MyPythonNode(Node):
                                                    qos_profile=qos_profile)
         self.subrel_alt  # prevent unused variable warning
 
-        self.sublaser = self.create_subscription(Float64MultiArray, '/ping/data', self.pinger_callback,
+        self.sublaser = self.create_subscription(Float64MultiArray, '/bluerov2/ping1d/data', self.pinger_callback,
                                                  qos_profile=qos_profile)
         self.sublaser
 
@@ -772,15 +787,15 @@ class MyPythonNode(Node):
         self._declare_and_fill_slider('k_i_depth', 0.0, "K I of depth", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_depth', 0.0, "K D of depth", 0.0, 5.0, self.config)
 
-        self._declare_and_fill_slider('k_p_yaw', 1.0, "K P of yaw", 0.0, 10.0, self.config)
+        self._declare_and_fill_slider('k_p_yaw', 0.1, "K P of yaw", 0.0, 10.0, self.config)
         self._declare_and_fill_slider('k_i_yaw', 0.0, "K I of yaw", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_yaw', 0.0, "K D of yaw", 0.0, 5.0, self.config)
 
-        self._declare_and_fill_slider('k_p_surge', 1.0, "K P of surge", 0.0, 10.0, self.config)
+        self._declare_and_fill_slider('k_p_surge', 0.0, "K P of surge", 0.0, 10.0, self.config)
         self._declare_and_fill_slider('k_i_surge', 0.0, "K I of surge", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_surge', 0.0, "K D of surge", 0.0, 5.0, self.config)
 
-        self._declare_and_fill_slider('k_p_sway', 1.0, "K P of sway", 0.0, 10.0, self.config)
+        self._declare_and_fill_slider('k_p_sway', 0.0, "K P of sway", 0.0, 10.0, self.config)
         self._declare_and_fill_slider('k_i_sway', 0.0, "K I of sway", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_sway', 0.0, "K D of sway", 0.0, 5.0, self.config)
 

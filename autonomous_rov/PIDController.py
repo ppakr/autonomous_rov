@@ -4,7 +4,7 @@ from copy import deepcopy
 
 
 class PIDController:
-    def __init__(self, k_p=1.0, k_i=0.0, k_d=0.0, sat=10.0, type='linear'):
+    def __init__(self, k_p=0.0, k_i=0.0, k_d=0.0, sat=10.0, type='linear'):
         # variables declaration
         self.k_p = k_p
         self.k_i = k_i
