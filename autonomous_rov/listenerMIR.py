@@ -19,7 +19,7 @@ from std_srvs.srv import SetBool
 from autonomous_rov.PIDController import PIDController
 # from autonomous_rov.CubicTrajectory import CubicTrajectory
 from autonomous_rov.AlphaBetaFilter import AlphaBetaFilter
-from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
+from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult, FloatingPointRange
 from rclpy.parameter import ParameterType
 
 class MyPythonNode(Node):
@@ -64,7 +64,7 @@ class MyPythonNode(Node):
         
         # variables
         # mode -> array
-        self.set_mode = [0] * 3
+        self.set_mode = [0] * 4
         self.set_mode[0] = True  # Mode manual
         self.set_mode[1] = False  # Mode automatic without correction
         self.set_mode[2] = False  # Mode with correction
@@ -756,13 +756,12 @@ class MyPythonNode(Node):
         return SetParametersResult(successful=True)
 
     def _declare_and_fill_slider(self, key, default_value, description, min_value, max_value, map):
+        float_range = FloatingPointRange(from_value=min_value, to_value=max_value, step=0.0)
         param = self.declare_parameter(
             key, default_value, ParameterDescriptor(
                 description=description,
                 type=ParameterType.PARAMETER_DOUBLE,
-                floating_point_range=[
-                    {"from_value": min_value, "to_value": max_value}
-                ]
+                floating_point_range=[float_range]
             )
         )
         map[key] = param.value
