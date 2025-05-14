@@ -558,17 +558,17 @@ class MyPythonNode(Node):
         if self.set_mode[2]:
 
             self.get_logger().info("Visual tracker data rece ived.")
-            # roll_left_right = self.mapValueScalSat(data.angular.x)
+            roll_left_right = self.mapValueScalSat(data.angular.x)
             yaw_left_right = self.mapValueScalSat(data.angular.z)
-            # ascend_descend = self.mapValueScalSat(data.linear.z)
-            # forward_reverse = self.mapValueScalSat(data.linear.x)
+            ascend_descend = self.mapValueScalSat(data.linear.z)
+            forward_reverse = self.mapValueScalSat(data.linear.x)
             lateral_left_right = self.mapValueScalSat(data.linear.y)
-            # pitch_left_right = self.mapValueScalSat(data.angular.y)
-            pitch_left_right = 1500
-            roll_left_right = 1500
-            ascend_descend = 1500
+            pitch_left_right = self.mapValueScalSat(data.angular.y)
+            # pitch_left_right = 1500
+            # roll_left_right = 1500
+            # ascend_descend = 1500
             # lateral_left_right = 1500
-            forward_reverse = 1500
+            # forward_reverse = 1500
             # yaw_left_right = 1500
             yaw_left_right = min(1600, max(1400, yaw_left_right))  # Saturate yaw command
             lateral_left_right = min(1600, max(1400, lateral_left_right))  # Saturate lateral command
