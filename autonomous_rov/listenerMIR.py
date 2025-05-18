@@ -354,6 +354,12 @@ class MyPythonNode(Node):
 
         # yaw control
         # yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, angle.angular.z, current_time)
+
+        if self.desired_yaw > 180:
+            self.desired_yaw -= 360
+        elif self.desired_yaw < -180:
+            self.desired_yaw += 360
+            
         yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, filtered_angle, current_time)
 
 
