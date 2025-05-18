@@ -91,6 +91,7 @@ class MyPythonNode(Node):
         self.free_path = False
         self.search_path = True
         self.crab_walk = False
+        self.positive_rotation = True
 
 
         self.Vmax_mot = 1900
@@ -391,8 +392,8 @@ class MyPythonNode(Node):
             self.pinger_threshold = 1.0  # threshold for pinger confidence
 
             # Obstacle detected: closer than safe threshold
-            if self.pinger_confidence < 70:
-                self.get_logger().info("Obstacle detected by pinger")
+            if self.pinger_confidence < 60:
+                self.get_logger().info("Low confidence from pinger")
                 self.surge_pwm = 1500
                 self.sway_pwm = 1500
                 # self.Correction_yaw_pwm = 1500
@@ -414,15 +415,15 @@ class MyPythonNode(Node):
                     self.pinger_error_change = self.pinger_error - self.pinger_prev_error
                     self.pinger_prev_error = self.pinger_error
 
-                    if np.abs(self.pinger_error_change) > 0.05 and self.crab_walk:
-                        self.surge_control = self.pid_surge.calculate_pid(
-                            self.pinger_distance, self.pinger_threshold, current_time
-                        )
-                        self.surge_pwm = self.pid_to_pwm(surge_control)
-                        self.sway_pwm = 1600  # Crab walk
+                    # if np.abs(self.pinger_error_change) > 0.05 and self.crab_walk:
+                    #     self.surge_control = self.pid_surge.calculate_pid(
+                    #         self.pinger_distance, self.pinger_threshold, current_time
+                    #     )
+                    #     self.surge_pwm = self.pid_to_pwm(surge_control)
+                    #     self.sway_pwm = 1600  # Crab walk
 
                     # If the distance isn't changing much, assume stuck and start search
-                    if abs(self.pinger_error_change) < 0.05:
+                    if abs(self.pinger_error_change) < 0.005:
                         self.surge_pwm = 1500
                         self.sway_pwm = 1500
                         self.search_path = True
@@ -432,7 +433,13 @@ class MyPythonNode(Node):
                     self.get_logger().info("Searching for path")
                     self.surge_pwm = 1500
                     self.sway_pwm = 1500
-                    self.desired_yaw += -1  # Slowly rotate to look around
+                    if self.desired_yaw == -100:
+                        self.positive_rotation = True
+                    if self.desired_yaw <100 and self.positive_rotation:
+                        self.desired_yaw += 0.5  # Slowly rotate to look around
+                    else:
+                        self.positive_rotation = False
+                        self.desired_yaw -= 0.5
 
                     # If obstacle is now far enough, resume movement
                     if self.pinger_distance > 2 * self.pinger_threshold:
