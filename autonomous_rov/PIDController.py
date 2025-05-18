@@ -33,10 +33,10 @@ class PIDController:
         if self.type == 'linear':
             pass
         elif self.type == 'angular':
-            if self.err > np.pi:
-                self.err = self.err - (2.0 * np.pi)
-            elif self.err < -np.pi:
-                self.err = self.err + (2.0 * np.pi)
+            if self.err > 180.0:
+                self.err = self.err - 360.0
+            elif self.err < -180.0:
+                self.err = self.err + 360.0
 
         self.t = t
         dt = self.t - self.prev_t

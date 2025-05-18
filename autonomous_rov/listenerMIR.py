@@ -326,10 +326,10 @@ class MyPythonNode(Node):
 
         # Compute yaw error
         yaw_error = self.desired_yaw - angle.angular.z
-        if yaw_error > np.pi:
-            yaw_error -= 2.0 * np.pi
-        elif yaw_error < -np.pi:
-            yaw_error += 2.0 * np.pi
+        if yaw_error > 180:
+            yaw_error -= 360
+        elif yaw_error < -180:
+            yaw_error += 360
 
         # trajectory generation
         ############# NOTE: Uncomment trajectory for depth control #############
@@ -672,7 +672,7 @@ class MyPythonNode(Node):
                              lateral_left_right)
     
     def visual_tracker_callback(self, data):
-        if (self.set_mode[2] or self.set_mode[0]):
+        if (self.set_mode[2] or self.set_mode[0] or self.set_mode[3]):
             return
         else:
             self.get_logger().info("Visual tracker data rece ived.")
@@ -770,10 +770,14 @@ class MyPythonNode(Node):
         self.pid_yaw.reconfig_param(self.config['k_p_yaw'], self.config['k_i_yaw'], self.config['k_d_yaw'])
         self.pid_surge.reconfig_param(self.config['k_p_surge'], self.config['k_i_surge'], self.config['k_d_surge'])
         self.pid_sway.reconfig_param(self.config['k_p_sway'], self.config['k_i_sway'], self.config['k_d_sway'])
+        self.pinger_threshold = self.get_parameter('pinger_threshold').value
 
     def callback_params(self, params):
         for param in params:
-            self.config[param.name] = param.value
+            if param.name == 'pinger_threshold':
+                 self.pinger_threshold = param.value
+            else:
+                self.config[param.name] = param.value
         self.update_control_param()
         return SetParametersResult(successful=True)
 
@@ -805,6 +809,7 @@ class MyPythonNode(Node):
         self._declare_and_fill_slider('k_p_sway', 0.0, "K P of sway", 0.0, 10.0, self.config)
         self._declare_and_fill_slider('k_i_sway', 0.0, "K I of sway", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_sway', 0.0, "K D of sway", 0.0, 5.0, self.config)
+        self.declare_parameter('pinger_threshold', 0.75, ParameterDescriptor(description='Pinger distance threshold for avoidance'))
 
  
         self.update_control_param()
