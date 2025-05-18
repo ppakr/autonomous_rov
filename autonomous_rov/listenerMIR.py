@@ -75,7 +75,7 @@ class MyPythonNode(Node):
         self.init_p0 = True
         self.arming = False
 
-        self.angle_roll_ajoyCallback0 = 0.0
+        self.angle_roll_a0 = 0.0
         self.angle_pitch_a0 = 0.0
         self.angle_yaw_a0 = 0.0
         self.depth_wrt_startup = 0
@@ -321,7 +321,7 @@ class MyPythonNode(Node):
         
         # self.desired_yaw = angle.angular.z
         # alpha-beta filter
-        # filtered_angle, filtered_angle_dot = self.yaw_filter.filter(angle.angular.z, current_time)
+        filtered_angle, filtered_angle_dot = self.yaw_filter.filter(angle.angular.z, current_time)
 
         # Compute yaw error
         yaw_error = self.desired_yaw - angle.angular.z
@@ -352,7 +352,9 @@ class MyPythonNode(Node):
                 self.get_logger().info("Trajectory complete.")
 
         # yaw control
-        yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, angle.angular.z, current_time)
+        # yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, angle.angular.z, current_time)
+        yaw_control = self.pid_yaw.calculate_pid(self.desired_yaw, filtered_angle, current_time)
+
 
         # Send PWM commands to motors
         # yaw command to be adapted using sensor feedback
