@@ -86,7 +86,7 @@ class MyPythonNode(Node):
         self.pinger_prev_error = 0.0
         self.pinger_error_change = 0.0
         self.pinger_error = 0.0
-        self.pinger_threshold = 0.75
+        self.pinger_threshold = 0.9  # threshold for pinger confidence
 
         self.free_path = False
         self.search_path = True
@@ -391,7 +391,7 @@ class MyPythonNode(Node):
 
             # self.get_logger().info(f"Distance: {self.pinger_distance:.3f}")
 
-            self.pinger_threshold = 1.0  # threshold for pinger confidence
+            self.pinger_threshold = 0.9  # threshold for pinger confidence
 
             # Obstacle detected: closer than safe threshold
             if self.pinger_confidence < 60:
@@ -811,7 +811,7 @@ class MyPythonNode(Node):
         self._declare_and_fill_slider('k_p_sway', 0.0, "K P of sway", 0.0, 10.0, self.config)
         self._declare_and_fill_slider('k_i_sway', 0.0, "K I of sway", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_sway', 0.0, "K D of sway", 0.0, 5.0, self.config)
-        self.declare_parameter('pinger_threshold', 0.75, ParameterDescriptor(description='Pinger distance threshold for avoidance'))
+        self.declare_parameter('pinger_threshold', 0.9, ParameterDescriptor(description='Pinger distance threshold for avoidance'))
 
  
         self.update_control_param()
