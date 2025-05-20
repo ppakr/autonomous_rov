@@ -288,13 +288,20 @@ class MyPythonNode(Node):
             self.angle_yaw_a0 = angle_yaw
             self.init_a0 = False
 
+        # angle_wrt_startup = [0] * 3
+        # angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (
+        #             2.0 * math.pi) - math.pi) * 180 / math.pi
+        # angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (
+        #             2.0 * math.pi) - math.pi) * 180 / math.pi
+        # angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (
+        #             2.0 * math.pi) - math.pi) * 180 / math.pi
+        
+        # angle_wrt_startup -> unit: degree
+
         angle_wrt_startup = [0] * 3
-        angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (
-                    2.0 * math.pi) - math.pi) * 180 / math.pi
-        angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (
-                    2.0 * math.pi) - math.pi) * 180 / math.pi
-        angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (
-                    2.0 * math.pi) - math.pi) * 180 / math.pi
+        angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
+        angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
+        angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
 
         angle = Twist() # orientation in degrees but using twist msg for some reason
         angle.angular.x = angle_wrt_startup[0]
