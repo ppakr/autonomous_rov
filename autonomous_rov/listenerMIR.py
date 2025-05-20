@@ -86,7 +86,7 @@ class MyPythonNode(Node):
         self.pinger_prev_error = 0.0
         self.pinger_error_change = 0.0
         self.pinger_error = 0.0
-        self.pinger_threshold = 0.9  # threshold for pinger confidence
+        self.pinger_threshold = 1.0  # threshold for pinger confidence
 
         self.free_path = False
         self.search_path = True
@@ -134,6 +134,10 @@ class MyPythonNode(Node):
 
         # Service to start trajectory
         self.srv = self.create_service(SetBool, 'start_trajectory', self.trajectory_callback)
+
+        # moving avg filter
+        self.pinger_window = []
+        self.pinger_window_size = 10
 
     def trajectory_callback(self, request, response):
         """
@@ -288,20 +292,20 @@ class MyPythonNode(Node):
             self.angle_yaw_a0 = angle_yaw
             self.init_a0 = False
 
-        # angle_wrt_startup = [0] * 3
-        # angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (
-        #             2.0 * math.pi) - math.pi) * 180 / math.pi
-        # angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (
-        #             2.0 * math.pi) - math.pi) * 180 / math.pi
-        # angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (
-        #             2.0 * math.pi) - math.pi) * 180 / math.pi
+        angle_wrt_startup = [0] * 3
+        angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (
+                    2.0 * math.pi) - math.pi) * 180 / math.pi
+        angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (
+                    2.0 * math.pi) - math.pi) * 180 / math.pi
+        angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (
+                    2.0 * math.pi) - math.pi) * 180 / math.pi
         
         # angle_wrt_startup -> unit: degree
 
-        angle_wrt_startup = [0] * 3
-        angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
-        angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
-        angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
+        # angle_wrt_startup = [0] * 3
+        # angle_wrt_startup[0] = ((angle_roll - self.angle_roll_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
+        # angle_wrt_startup[1] = ((angle_pitch - self.angle_pitch_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
+        # angle_wrt_startup[2] = ((angle_yaw - self.angle_yaw_a0 + 3.0 * math.pi) % (2.0 * math.pi)) - math.pi
 
         angle = Twist() # orientation in degrees but using twist msg for some reason
         angle.angular.x = angle_wrt_startup[0]
@@ -399,19 +403,33 @@ class MyPythonNode(Node):
             current_time = time_tupple[0] + (time_tupple[1] * 10**-9)
 
             # extract pinger data
-            self.pinger_distance = data.data[0]
+            # self.pinger_distance = data.data[0]
+            raw_distance = data.data[0]
             self.pinger_confidence = data.data[1]
+
+            self.pinger_window.append(raw_distance)
+
+            # Limit size
+            if len(self.pinger_window) > self.pinger_window_size:
+                self.pinger_window.pop(0)
+
+            
+            # calculate moving avg
+            self.pinger_distance = sum(self.pinger_window) / len(self.pinger_window)
+            self.get_logger().info(f"Estimated distance: {self.pinger_distance:.3f}")
 
             # self.get_logger().info(f"Distance: {self.pinger_distance:.3f}")
 
-            self.pinger_threshold = 0.9  # threshold for pinger confidence
+            self.pinger_threshold = 1.0  # threshold for pinger confidence
 
             # Obstacle detected: closer than safe threshold
             if self.pinger_confidence < 60:
                 self.get_logger().info("Low confidence from pinger")
                 self.surge_pwm = 1500
                 self.sway_pwm = 1500
-                # self.Correction_yaw_pwm = 1500
+                self.Correction_yaw_pwm = 1500
+
+            
             
             else:
                 
@@ -465,7 +483,7 @@ class MyPythonNode(Node):
                 # If the path is clear, move forward
                 if self.free_path:
                     self.get_logger().info("Free path detected by pinger >>> surging")
-                    self.surge_pwm = 1535 # * self.pid_sway.k_p  # Move forward
+                    self.surge_pwm = 1525 # * self.pid_sway.k_p  # Move forward
                     # self.Correction_yaw_pwm = 1500
                     self.sway_pwm = 1500   # Keep lateral movement neutral
                     
@@ -824,7 +842,7 @@ class MyPythonNode(Node):
         self._declare_and_fill_slider('k_p_sway', 0.0, "K P of sway", 0.0, 10.0, self.config)
         self._declare_and_fill_slider('k_i_sway', 0.0, "K I of sway", 0.0, 5.0, self.config)
         self._declare_and_fill_slider('k_d_sway', 0.0, "K D of sway", 0.0, 5.0, self.config)
-        self.declare_parameter('pinger_threshold', 0.9, ParameterDescriptor(description='Pinger distance threshold for avoidance'))
+        self.declare_parameter('pinger_threshold', 1.0, ParameterDescriptor(description='Pinger distance threshold for avoidance'))
 
  
         self.update_control_param()
